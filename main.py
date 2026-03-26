@@ -14,35 +14,39 @@ st.title("🦠 Epidemic Spread Intelligence Dashboard")
 uploaded_file = st.file_uploader("Upload CSV/Excel file", type=['csv', 'xlsx', 'xls'])
 
 if uploaded_file:
+
     # Read file
     if uploaded_file.name.endswith('.csv'):
         df = pd.read_csv(uploaded_file)
     else:
         df = pd.read_excel(uploaded_file)
 
-    # 🔥 Clean column names
+    # Clean column names
     df.columns = df.columns.str.strip().str.lower()
 
     st.sidebar.success(f"Data loaded: {len(df)} rows, {len(df.columns)} columns")
 
-    # 🔍 Detect cases column
+    # Detect cases column
     case_col = next((col for col in df.columns if 'case' in col), None)
 
     if not case_col:
         st.error(f"No 'cases' column found. Available columns: {df.columns.tolist()}")
         st.stop()
 
-    # 🔍 Try convert first column to datetime
+    # Ensure numeric values
+    df[case_col] = pd.to_numeric(df[case_col], errors='coerce')
+    df = df.dropna(subset=[case_col])
+
+    # Detect date column
     date_col = df.columns[0]
     try:
         df[date_col] = pd.to_datetime(df[date_col])
     except:
         pass
 
-    # 🔍 Detect datetime column safely
     date_cols = df.select_dtypes(include=['datetime']).columns
 
-    epidemic_title = "COVID-19 Spread Analysis" if 'covid' in str(uploaded_file.name).lower() else "Epidemic Spread Analysis"
+    epidemic_title = "COVID-19 Spread Analysis" if 'covid' in uploaded_file.name.lower() else "Epidemic Spread Analysis"
     st.header(epidemic_title)
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
@@ -59,7 +63,7 @@ if uploaded_file:
             dcol = date_cols[0]
             st.write(f"**Date Range:** {df[dcol].min()} to {df[dcol].max()}")
         else:
-            st.write("**Date Range:** No datetime column found")
+            st.write("No datetime column found")
 
     # ---------------- TAB 2 ----------------
     with tab2:
@@ -91,46 +95,110 @@ if uploaded_file:
         pred_days = st.slider("Forecast Days", 1, 30, 7)
 
         last_value = df[case_col].iloc[-1]
-        growth_rate = df[case_col].pct_change().mean()
+
+        growth_rate = (
+            df[case_col]
+            .pct_change()
+            .replace([float('inf'), -float('inf')], 0)
+            .fillna(0)
+            .mean()
+        )
+
+        st.write("📈 Growth Rate Used:", round(growth_rate, 4))
 
         if len(date_cols) > 0:
             future_dates = pd.date_range(start=df[date_col].iloc[-1], periods=pred_days+1)[1:]
         else:
-            future_dates = range(pred_days)
+            future_dates = list(range(1, pred_days+1))
 
-        predictions = [last_value * (1 + growth_rate) ** i for i in range(1, pred_days+1)]
+        predictions = [
+            last_value * (1 + growth_rate) ** i
+            for i in range(1, pred_days + 1)
+        ]
 
         pred_df = pd.DataFrame({
             'Date': future_dates,
             'Predicted Cases': predictions
         })
 
+        st.dataframe(pred_df)
+
         fig_pred = px.line(pred_df, x='Date', y='Predicted Cases', title='Forecast')
         st.plotly_chart(fig_pred)
 
-    # ---------------- TAB 4 ----------------
+    # ---------------- TAB 4 (UPGRADED) ----------------
     with tab4:
         st.subheader("Intervention Impact Analysis")
 
-        intervention = st.selectbox(
-            "Select Intervention",
+        interventions = st.multiselect(
+            "Select Interventions",
             ["Lockdown", "Vaccination", "Social Distancing", "Mask Mandate"]
         )
 
-        effectiveness = st.slider("Effectiveness %", 0, 100, 50)
+        effectiveness = st.slider("Base Effectiveness %", 0, 100, 50)
 
         base_cases = df[case_col].iloc[-1]
-        reduced_cases = base_cases * (1 - effectiveness / 100)
 
-        st.metric(f"Cases with {intervention}", f"{reduced_cases:,.0f}", delta=f"-{effectiveness}%")
+        impact_factors = {
+            "Lockdown": 0.7,
+            "Vaccination": 0.6,
+            "Social Distancing": 0.5,
+            "Mask Mandate": 0.4
+        }
 
-        impact_data = pd.DataFrame({
-            'Scenario': ['Current', 'With Intervention'],
-            'Cases': [base_cases, reduced_cases]
-        })
+        if not interventions:
+            st.warning("⚠️ Please select at least one intervention")
+        else:
+            total_effect = 0
+            contributions = []
 
-        fig_impact = px.bar(impact_data, x='Scenario', y='Cases', title='Intervention Impact')
-        st.plotly_chart(fig_impact)
+            for i, intervention in enumerate(interventions):
+                factor = impact_factors[intervention]
+                adjusted = effectiveness * factor * (0.9 ** i)
+                total_effect += adjusted
+
+                contributions.append({
+                    "Intervention": intervention,
+                    "Impact %": adjusted
+                })
+
+            total_effect = min(total_effect, 95)
+
+            reduced_cases = base_cases * (1 - total_effect / 100)
+
+            st.metric(
+                "Cases after interventions",
+                f"{reduced_cases:,.0f}",
+                delta=f"-{total_effect:.1f}%"
+            )
+
+            # Comparison chart
+            impact_data = pd.DataFrame({
+                'Scenario': ['Current', 'After Interventions'],
+                'Cases': [base_cases, reduced_cases]
+            })
+
+            fig_impact = px.bar(
+                impact_data,
+                x='Scenario',
+                y='Cases',
+                title='Combined Intervention Impact'
+            )
+            st.plotly_chart(fig_impact)
+
+            # Contribution chart
+            st.subheader("Intervention Contributions")
+
+            contrib_df = pd.DataFrame(contributions)
+
+            fig_contrib = px.bar(
+                contrib_df,
+                x='Intervention',
+                y='Impact %',
+                title='Individual Contribution'
+            )
+
+            st.plotly_chart(fig_contrib)
 
     # ---------------- TAB 5 ----------------
     with tab5:
