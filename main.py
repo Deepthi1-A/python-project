@@ -2,10 +2,13 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import io
-import groq
+from groq import Groq
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
+from dotenv import load_dotenv
+load_dotenv()
+
 
 st.set_page_config(page_title="Epidemic Dashboard", layout="wide")
 st.title("🦠 Epidemic Spread Intelligence Dashboard")
