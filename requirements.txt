@@ -3,6 +3,5 @@ plotly
 reportlab
 groq
 
-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
 
 
